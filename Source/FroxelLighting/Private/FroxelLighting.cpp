@@ -1,7 +1,6 @@
 #include "FroxelLighting.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
-#include "ShaderCore.h"
 
 #define LOCTEXT_NAMESPACE "FFroxelLightingModule" // for the sake of convention
 

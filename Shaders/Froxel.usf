@@ -1,0 +1,14 @@
+// placholder for now
+
+RWStructuredBuffer<uint> OutData : register(u0);
+
+[numthreads(8, 8, 1)]
+void FroxelClearCS(uint3 DTid : SV_DispatchThreadID)
+{
+    // boilerplate pattern to avoid warnings
+    uint idx = DTid.x + DTid.y * BufferWidth;
+    if (idx < OutData.Length)
+    {
+        OutData[idx] = DTid.x + DTid.y + DTid.z;
+    }
+}

@@ -1,0 +1,27 @@
+name: Plugin CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  lint:
+    name: Lint and Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate file structure
+        run: |
+          test -f FroxelLighting.uplugin
+          test -d Source/FroxelLighting
+
+      - name: Run C++ formatting check (clang-format)
+        run: |
+          sudo apt-get install -y clang-format
+          clang-format --dry-run --Werror $(find Source -name '*.h' -o -name '*.cpp')
+
+# TODO Build plugin for UE5.6.1 on Windows

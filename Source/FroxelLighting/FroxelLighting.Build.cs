@@ -20,8 +20,7 @@ public class FroxelLighting : ModuleRules
             "Projects",
             "Renderer",
             "RenderCore",
-            "RHI",
-            "ShaderCore"
+            "RHI"
         });
 
         // including shader files in the package

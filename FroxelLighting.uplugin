@@ -1,0 +1,24 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0.0",
+  "FriendlyName": "Froxel Lighting",
+  "Description": "Clustered (froxel) lighting plugin with Render Graph integration.",
+  "Category": "Rendering",
+  "CreatedBy": "Armin Tajik",
+  "CreatedByURL": "https://armintajik.com",
+  "DocsURL": "",
+  "SupportURL": "",
+  "CanContainContent": false,
+  "IsBetaVersion": true,
+  "IsExperimentalVersion": true,
+  "Modules": [
+    {
+      "Name": "FroxelLighting",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "SupportedTargetPlatforms": [ "Win64", "Mac" ],
+  "Plugins": []
+}

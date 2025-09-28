@@ -16,7 +16,7 @@
     {
       "Name": "FroxelLighting",
       "Type": "Runtime",
-      "LoadingPhase": "Default"
+      "LoadingPhase": "PostConfigInit"
     }
   ],
   "SupportedTargetPlatforms": [ "Win64", "Mac" ],

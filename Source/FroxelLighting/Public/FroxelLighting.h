@@ -5,6 +5,7 @@
 class FFroxelViewExtension;
 DECLARE_LOG_CATEGORY_EXTERN(LogFroxelLighting, Log, All);
 DECLARE_GPU_STAT_NAMED_EXTERN(Froxel, TEXT("Froxel"));
+
 // Module interface. Loads shaders and sets up mappings on startup.
 class FFroxelLightingModule : public IModuleInterface
 {

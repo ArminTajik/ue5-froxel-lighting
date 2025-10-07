@@ -1,0 +1,69 @@
+/*=============================================================================
+        FroxelCommon.ush - Common shader code for froxel lighting
+=============================================================================*/
+
+#ifndef FROXEL_COMMON_USH
+#define FROXEL_COMMON_USH
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Generated/GeneratedUniformBuffers.ush"
+
+// Helpers ----------------------------------------------------------------
+uint FroxelIndex(uint3 g) {
+    uint idx = g.x + (g.y * FroxelCommon.GridSize.x) + (g.z * FroxelCommon.GridSize.x * FroxelCommon.GridSize.y);
+    // Clamp to valid range
+    return min(idx, (uint)(FroxelCommon.GridSize.w - 1));
+}
+
+uint FroxelIndexFromPix(uint2 pix, uint z) {
+    uint gx = pix.x / max(FroxelCommon.TileSize.x, 1);
+    uint gy = pix.y / max(FroxelCommon.TileSize.y, 1);
+    gx = min(gx, (uint)(FroxelCommon.GridSize.x - 1));
+    gy = min(gy, (uint)(FroxelCommon.GridSize.y - 1));
+    z = min(z, (uint)(FroxelCommon.GridSize.z - 1));
+    return gx + (gy * FroxelCommon.GridSize.x) + (z * FroxelCommon.GridSize.x * FroxelCommon.GridSize.y);
+}
+
+uint FroxelIndexFromViewportUV(float2 uv, uint z) {
+    uint gx = min(uv.x, 1.0f) * FroxelCommon.GridSize.x;
+    uint gy = min(uv.y, 1.0f) * FroxelCommon.GridSize.y;
+    // z = min(z, (uint)(FroxelCommon.GridSize.z - 1));
+    return gx + (gy * FroxelCommon.GridSize.x) + (z * (uint)FroxelCommon.GridSize.x * (uint)FroxelCommon.GridSize.y);
+}
+
+uint FroxelZFromLinearDepthCm_Log(float depthCm) {
+    float nearCm = FroxelCommon.NearCm;
+    float farCm = max(FroxelCommon.FarCm, nearCm + 1e-3);
+
+    depthCm = clamp(depthCm, nearCm, farCm);
+
+    float t = log(depthCm / nearCm) / log(farCm / nearCm); // [0,1]
+    uint z = (uint)min(floor(saturate(t) * FroxelCommon.GridSize.z), FroxelCommon.GridSize.z - 1);
+    return z;
+}
+
+uint FroxelZFromLinearDepthCm(float depthCm) {
+    float nearCm = FroxelCommon.NearCm;
+    float farCm = max(FroxelCommon.FarCm, nearCm + 1e-3);
+
+    depthCm = clamp(depthCm, nearCm, farCm);
+
+    float t = saturate((depthCm - nearCm) / (farCm - nearCm));
+    uint z = (uint)min(floor(t * FroxelCommon.GridSize.z), FroxelCommon.GridSize.z - 1);
+    return z;
+}
+
+
+float3 DebugColorFromIndex(uint idx) {
+    uint h = idx;
+    h ^= h >> 16;
+    h *= 0x7feb352d;
+    h ^= h >> 15;
+    h *= 0x846ca68b;
+    h ^= h >> 16;
+    float3 c = float3((h) & 255u, (h >> 8) & 255u, (h >> 16) & 255u) / 255.0;
+    
+    return c;
+}
+
+#endif

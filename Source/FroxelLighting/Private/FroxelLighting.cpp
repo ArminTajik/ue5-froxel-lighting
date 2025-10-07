@@ -32,6 +32,32 @@ TAutoConsoleVariable<int32> CVarFroxelGridZ(
     TEXT("Froxel grid dimension Z."),
     ECVF_Default);
 
+TAutoConsoleVariable<int32> CVarFroxelVisualize(
+    TEXT("r.Froxel.Visualize"),
+    1,
+    TEXT("Visualize Froxel grid (0: off, 1: on)."),
+    ECVF_Default);
+
+TAutoConsoleVariable<int32> CVarFroxelMaxLightsPerFroxel(
+        TEXT("r.Froxel.MaxLightsPerFroxel"),
+        32,
+        TEXT("Maximum number of lights that can be assigned to a single froxel."),
+        ECVF_Default);
+
+TAutoConsoleVariable<int32> CVarFroxelFarClipCm(
+        TEXT("r.Froxel.FarClipCm"),
+        100000,
+        TEXT("Froxel grid far clipping plane in cm."),
+        ECVF_Default);
+
+TAutoConsoleVariable<int32> CVarFroxelZMode(
+        TEXT("r.Froxel.ZMode"),
+        1,
+        TEXT("Froxel grid Z distribution mode (0: linear, 1: logarithmic)."),
+        ECVF_Default);
+
+
+
 // Module implementation ---------------------------------------
 
 void FFroxelLightingModule::StartupModule() {
@@ -46,7 +72,7 @@ void FFroxelLightingModule::StartupModule() {
 
     auto RegisterVE = [this]() {
         ViewExt = FSceneViewExtensions::NewExtension<FFroxelViewExtension>();
-        UE_LOG(LogFroxelLighting, Log, TEXT("[Froxel] ViewExtension registered (post engine init)"));
+        UE_LOG(LogFroxelLighting, Log, TEXT("ViewExtension registered (post engine init)"));
     };
 
     if (GEngine) {

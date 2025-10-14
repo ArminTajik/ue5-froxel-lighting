@@ -1,0 +1,54 @@
+/*=============================================================================
+FroxelOffsetPassB.usf: Compute shader to generate froxel offsets total sum for all z-slices.
+=============================================================================*/
+#include "FroxelCommon.ush"
+
+// Input
+StructuredBuffer<uint> ZSliceTotals;
+RWStructuredBuffer<uint> ZSliceOffsets;
+
+groupshared uint sData[1024];
+
+[numthreads(1024, 1, 1)]
+void MainCS(uint3 GTid : SV_GroupThreadID) {
+
+    const uint tid = GTid.x; // index in the slice
+    const uint GZ = FroxelCommon.GridSize.z;
+    // initialize the shared data
+    sData[tid] = (tid < GZ) ? ZSliceTotals[tid] : 0;
+    GroupMemoryBarrierWithGroupSync();
+
+    // upsweep
+    for (uint d = 1; d < GZ; d <<= 1) {
+        uint t = (tid + 1) * (d << 1) - 1;
+
+        if (t < GZ) {
+            sData[t] += sData[t - d];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    // midpoint
+    if (GZ > 0 && tid == GZ - 1) {
+        sData[tid] = 0; // make the scan exclusive
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // downsweep
+    for (uint d = GZ >> 1; d >= 1; d >>= 1) {
+        uint t = (tid + 1) * (d << 1) - 1;
+
+        if (t < GZ) {
+            uint temp = sData[t - d];
+            sData[t - d] = sData[t];
+            sData[t] += temp;
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+        if (d == 1)
+            break;
+    }
+
+    if (tid < GZ)
+        ZSliceOffsets[tid] = sData[tid];
+}

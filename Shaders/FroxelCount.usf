@@ -1,0 +1,44 @@
+/*=============================================================================
+FroxelCount.usf: Compute shader for froxel light counting. It counts how many lights
+are affecting each froxel and stores the result in a buffer.
+=============================================================================*/
+
+#include "FroxelCommon.ush"
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Generated/GeneratedUniformBuffers.ush"
+
+StructuredBuffer<FFroxelLightData> Lights; // Input (size = NumLights)
+RWStructuredBuffer<uint> FroxelLightCounts; // Output (size = GridCount)
+
+[numthreads(64, 1, 1)]
+void MainCS(uint3 DTid : SV_DispatchThreadID) {
+
+    uint idx = DTid.x;
+    if (idx >= FroxelCommon.NumLights)
+        return;
+
+    FFroxelLightData L = Lights[idx];
+
+    uint2 tMin, tMax;
+    uint zMin, zMax;
+
+    if (!SphereViewRectAndZ(
+        L.PositionWS,
+        L.Radius,
+        View.TranslatedWorldToView,
+        View.TranslatedWorldToClip,
+        tMin,
+        tMax,
+        zMin,
+        zMax))
+        return;
+
+    for (uint z = zMin; z < zMax; ++z) {
+        for (uint y = tMin.y; y < tMax.y; ++y) {
+            for (uint x = tMin.x; x < tMax.x; ++x) {
+                uint fidx = FroxelIndex(x, y, z);
+                InterlockedAdd(FroxelLightCounts[fidx], 1);
+            }
+        }
+    }
+}

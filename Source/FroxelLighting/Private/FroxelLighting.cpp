@@ -34,7 +34,7 @@ TAutoConsoleVariable<int32> CVarFroxelGridZ(
 
 TAutoConsoleVariable<int32> CVarFroxelVisualize(
     TEXT("r.Froxel.Visualize"),
-    1,
+    0,
     TEXT("Visualize Froxel grid (0: off, 1: on)."),
     ECVF_Default);
 

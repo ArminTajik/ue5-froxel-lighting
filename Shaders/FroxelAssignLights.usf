@@ -1,0 +1,58 @@
+/*=============================================================================
+FroxelAssignLights.usf: Compute shader for froxel light assignment. It assigns lights to froxels
+based on the froxel counts and offsets.
+=============================================================================*/
+#include "FroxelCommon.ush"
+
+// Input
+StructuredBuffer<FFroxelLightData> Lights; // size = NumLights
+StructuredBuffer<uint> FroxelLightOffsets; // size = GridCount
+StructuredBuffer<uint> TotalIndices; // size = 1
+
+// Output
+RWStructuredBuffer<uint> FroxelHeads; // size = GridCount
+RWStructuredBuffer<uint> FroxelLightIndices; // size = TotalIndices[0]
+
+
+[numthreads(64, 1, 1)]
+void MainCS(uint3 DTid : SV_DispatchThreadID) {
+    uint lightId = uint(DTid.x);
+    if (lightId >= TotalIndices[0])
+        return;
+
+    FFroxelLightData light = Lights[lightId];
+
+    uint2 tMin, tMax;
+    uint zMin, zMax;
+    matrix view = View.TranslatedWorldToView;
+    matrix clip = View.TranslatedWorldToClip;
+    FroxelLightIndices[0] = view[3][2];
+    
+    if (!SphereViewRectAndZ(
+    light.PositionWS,
+    light.Radius,
+    view,
+    clip,
+    tMin,
+    tMax,
+    zMin,
+    zMax))
+    return;
+    
+    for (uint z = zMin; z < zMax; ++z) {
+        for (uint y = tMin.y; y < tMax.y; ++y) {
+            for (uint x = tMin.x; x < tMax.x; ++x) {
+                uint fidx = FroxelIndex(x, y, z);
+                uint base = FroxelLightOffsets[fidx];
+                
+                uint write = 0;
+                InterlockedAdd(FroxelHeads[fidx], 1, write);
+                
+                if (write >= FroxelCommon.MaxLightsPerFroxel)
+                    return;
+                
+                FroxelLightIndices[base + write] = lightId;
+            }
+        }
+    }
+}

@@ -1,0 +1,26 @@
+/*=============================================================================
+FroxelOffsetPassB.usf: Add the slice offsets to each froxel offset to get the final offsets.
+=============================================================================*/
+#include "FroxelCommon.ush"
+
+// Input
+
+StructuredBuffer<uint> ZSliceOffsets;
+RWStructuredBuffer<uint> FroxelLightOffsets;
+
+[numthreads(256, 1, 1)]
+void MainCS(uint3 GTid : SV_GroupThreadID, uint3 GId : SV_GroupID) {
+
+    uint z = GId.x;
+    uint idx = GTid.x;
+
+    const uint GX = FroxelCommon.GridSize.x;
+    const uint GY = FroxelCommon.GridSize.y;
+    uint SliceSize = GX * GY;
+
+    if (idx > SliceSize)
+        return;
+
+    uint globalIdx = idx + z * SliceSize;
+    FroxelLightOffsets[globalIdx] += ZSliceOffsets[z];
+}

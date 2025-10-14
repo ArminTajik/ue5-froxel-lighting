@@ -3,52 +3,46 @@ FroxelOverlay.usf - Fullscreen overlay (raster PS) compositing over SceneColor
 =============================================================================*/
 
 #include "FroxelCommon.ush"
-#include "/Engine/Private/ScreenPass.ush"
-#include "/Engine/Private/SceneTextureParameters.ush"
-// #include "/Engine/Private/SceneTexturesCommon.ush"
-
-Texture2D SceneColorCopy;
-SamplerState SceneColorCopySampler;
-FScreenTransform SvPositionToInputTextureUV;
-
-
-Texture2D SceneDepthCopy;
-SamplerState SceneDepthCopySampler;
-// FScreenTransform SvPositionToDepthUV;
-
-SCREEN_PASS_TEXTURE_VIEWPORT(Input)
-
-float GetLinearDepthProj(float2 ScreenUV) {
-    // float DeviceZ = Texture2DSampleLevel(SceneTexturesStruct.SceneDepthTexture,
-    //                                      SceneTexturesStruct_SceneDepthTextureSampler, ScreenUV, 0).r;
-    float DeviceZ = Texture2DSample(SceneDepthCopy, SceneDepthCopySampler, ScreenUV).r;
-    return ConvertFromDeviceZ(DeviceZ);
-}
-
-void MainPS(
-    float4 SvPosition : SV_POSITION,
-    out float4 OutColor : SV_Target0) {
-
-    const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
-    // const float2 DepthUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDepthUV);
-    float2 ViewportUV = (int2(SvPosition.xy) - Input_ViewportMin) * Input_ViewportSizeInverse;
-
-    float ViewDepth = GetLinearDepthProj(UV);
-    uint ZSlice = FroxelZFromLinearDepthCm_Log(ViewDepth);
-
-    float4 SceneColor = Texture2DSample(SceneColorCopy, SceneColorCopySampler, UV);
-
-    float3 Overlay = DebugColorFromIndex(FroxelIndexFromViewportUV(ViewportUV, ZSlice));
-
-    // float3 Overlay = DebugColorFromIndex(ZSlice * (uint)FroxelCommon.GridSize.x * (uint)FroxelCommon.GridSize.y);
-
-    const float Alpha = 0.5;
-    float3 OutRGB = lerp(SceneColor.rgb, Overlay, Alpha);
-
-    OutColor = float4(OutRGB, 1.0);
-
-    //OutColor = float4((float3)Overlay.r, 1.0);
-    // OutColor = float4(Overlay, 1.0);
-
-    // OutColor = float4(depthUV, 1.0, 1.0);
-}
+// #include "/Engine/Private/ScreenPass.ush"
+// #include "/Engine/Private/SceneTextureParameters.ush"
+// // #include "/Engine/Private/SceneTexturesCommon.ush"
+//
+// Texture2D SceneColorCopy;
+// SamplerState SceneColorCopySampler;
+// FScreenTransform SvPositionToInputTextureUV;
+//
+//
+// Texture2D SceneDepthCopy;
+// SamplerState SceneDepthCopySampler;
+// // FScreenTransform SvPositionToDepthUV;
+//
+// SCREEN_PASS_TEXTURE_VIEWPORT(Input)
+//
+// float GetLinearDepthProj(float2 ScreenUV) {
+//     // float DeviceZ = Texture2DSampleLevel(SceneTexturesStruct.SceneDepthTexture,
+//     //                                      SceneTexturesStruct_SceneDepthTextureSampler, ScreenUV, 0).r;
+//     float DeviceZ = Texture2DSample(SceneDepthCopy, SceneDepthCopySampler, ScreenUV).r;
+//     return ConvertFromDeviceZ(DeviceZ);
+// }
+//
+// void MainPS(
+//     float4 SvPosition : SV_POSITION,
+//     out float4 OutColor : SV_Target0) {
+//
+//     const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
+//     // const float2 DepthUV = ApplyScreenTransform(SvPosition.xy, SvPositionToDepthUV);
+//     float2 ViewportUV = (int2(SvPosition.xy) - Input_ViewportMin) * Input_ViewportSizeInverse;
+//
+//     float ViewDepth = GetLinearDepthProj(UV);
+//     uint ZSlice = FroxelZFromLinearDepthCm(ViewDepth);
+//
+//     float4 SceneColor = Texture2DSample(SceneColorCopy, SceneColorCopySampler, UV);
+//
+//     float3 Overlay = DebugColorFromIndex(FroxelIndexFromViewportUV(ViewportUV, ZSlice));
+//     
+//     const float Alpha = 0.5;
+//     float3 OutRGB = lerp(SceneColor.rgb, Overlay, Alpha);
+//
+//     OutColor = float4(OutRGB, 1.0);
+//
+// }

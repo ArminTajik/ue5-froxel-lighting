@@ -1,0 +1,69 @@
+/*=============================================================================
+FroxelOffsetPassA.usf: Compute shader to generate froxel offsets from froxel light counts per z-slice.
+=============================================================================*/
+#include "FroxelCommon.ush"
+// Input
+StructuredBuffer<uint> FroxelLightCounts;
+RWStructuredBuffer<uint> FroxelLightOffsets;
+RWStructuredBuffer<uint> ZSliceTotals;
+
+groupshared uint sData[1024];
+
+[numthreads(64, 1, 1)]
+void MainCS(uint3 GTid : SV_GroupThreadID, uint3 GId : SV_GroupID) {
+
+    const uint idx = GTid.x; // index in the slice
+
+    const uint GX = FroxelCommon.GridSize.x;
+    const uint GY = FroxelCommon.GridSize.y;
+    const uint SliceSize = GX * GY;
+
+    if (idx >= SliceSize)
+        return;
+
+    const uint x = idx % GX;
+    const uint y = idx / GX;
+    const uint z = GId.x; // current Z slice, since we dispatch GZ groups
+
+    const uint globalIdx = x + (y * GX) + (z * SliceSize);
+
+    // Load data
+    sData[idx] = FroxelLightCounts[globalIdx];
+    GroupMemoryBarrierWithGroupSync();
+
+    // Blelloch scan
+
+    // Upsweep
+    for (uint d = 1; d < SliceSize; d <<= 1) {
+        uint t = (idx + 1) * (d << 1) - 1;
+        if (t < SliceSize) {
+            sData[t] += sData[t - d];
+        }
+        GroupMemoryBarrierWithGroupSync();
+    }
+
+    // mid-point of computation hourglass
+    if (idx == SliceSize - 1) {
+        ZSliceTotals[z] = sData[idx]; // total sum (we need this for passB)
+        sData[idx] = 0; // so that it's exclusive
+    }
+    GroupMemoryBarrierWithGroupSync();
+
+    // downsweep
+    for (uint d = SliceSize >> 1; d >= 1; d >>= 1) {
+        uint t = (idx + 1) * (d << 1) - 1;
+
+        if (t + d < SliceSize) {
+            uint temp = sData[t - d];
+            sData[t - d] += sData[t];
+            sData[t] += temp;
+        }
+
+        GroupMemoryBarrierWithGroupSync();
+        if (d == 1)
+            break; // to avoid infinite loop when d=0 (uint underflow)
+    }
+
+    // write per z-slice sum
+    FroxelLightOffsets[globalIdx] = sData[idx];
+}

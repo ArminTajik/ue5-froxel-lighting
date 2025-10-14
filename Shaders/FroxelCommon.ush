@@ -1,6 +1,7 @@
 /*=============================================================================
         FroxelCommon.ush - Common shader code for froxel lighting
 =============================================================================*/
+#pragma once
 
 #ifndef FROXEL_COMMON_USH
 #define FROXEL_COMMON_USH
@@ -8,12 +9,41 @@
 #include "/Engine/Private/Common.ush"
 #include "/Engine/Generated/GeneratedUniformBuffers.ush"
 
+/**
+ * for reference, UE creates FroxelCommon.variables from C++ side
+struct FroxelCommon {
+    int4 GridSize; // x = numX, y = numY, z = numZ, w = totalCount
+    float NearCm;
+    float FarCm;
+    int2 ViewportSize; // in pixels
+    float2 InvTilePx; // 1/tileW, 1/tileH (viewport space)
+};
+*/
+
+struct FFroxelLightData {
+    float3 PositionWS;
+    float Radius;
+    // float3 Color;
+    // float Intensity;
+};
+
 // Helpers ----------------------------------------------------------------
-uint FroxelIndex(uint3 g) {
-    uint idx = g.x + (g.y * FroxelCommon.GridSize.x) + (g.z * FroxelCommon.GridSize.x * FroxelCommon.GridSize.y);
-    // Clamp to valid range
+uint FroxelIndex(uint gx, uint gy, uint gz) {
+    return gx + gy * (uint)FroxelCommon.GridSize.x + gz * (uint)FroxelCommon.GridSize.x * (uint)FroxelCommon.GridSize.y;
+}
+
+uint FroxelIndexClamped(uint3 g) {
+    uint idx = FroxelIndex(g.x, g.y, g.z);
     return min(idx, (uint)(FroxelCommon.GridSize.w - 1));
 }
+
+uint FroxelIndexFromViewportUV(float2 uv, uint z) {
+    uint gx = min(uv.x, 1.0f) * FroxelCommon.GridSize.x;
+    uint gy = min(uv.y, 1.0f) * FroxelCommon.GridSize.y;
+    z = min(z, (uint)(FroxelCommon.GridSize.z - 1));
+    return FroxelIndex(gx, gy, z);
+}
+
 
 uint FroxelIndexFromPix(uint2 pix, uint z) {
     uint gx = pix.x / max(FroxelCommon.TileSize.x, 1);
@@ -21,36 +51,92 @@ uint FroxelIndexFromPix(uint2 pix, uint z) {
     gx = min(gx, (uint)(FroxelCommon.GridSize.x - 1));
     gy = min(gy, (uint)(FroxelCommon.GridSize.y - 1));
     z = min(z, (uint)(FroxelCommon.GridSize.z - 1));
-    return gx + (gy * FroxelCommon.GridSize.x) + (z * FroxelCommon.GridSize.x * FroxelCommon.GridSize.y);
+    return FroxelIndex(gx, gy, z);
 }
 
-uint FroxelIndexFromViewportUV(float2 uv, uint z) {
-    uint gx = min(uv.x, 1.0f) * FroxelCommon.GridSize.x;
-    uint gy = min(uv.y, 1.0f) * FroxelCommon.GridSize.y;
-    // z = min(z, (uint)(FroxelCommon.GridSize.z - 1));
-    return gx + (gy * FroxelCommon.GridSize.x) + (z * (uint)FroxelCommon.GridSize.x * (uint)FroxelCommon.GridSize.y);
-}
-
-uint FroxelZFromLinearDepthCm_Log(float depthCm) {
-    float nearCm = FroxelCommon.NearCm;
-    float farCm = max(FroxelCommon.FarCm, nearCm + 1e-3);
-
-    depthCm = clamp(depthCm, nearCm, farCm);
-
-    float t = log(depthCm / nearCm) / log(farCm / nearCm); // [0,1]
-    uint z = (uint)min(floor(saturate(t) * FroxelCommon.GridSize.z), FroxelCommon.GridSize.z - 1);
-    return z;
-}
 
 uint FroxelZFromLinearDepthCm(float depthCm) {
     float nearCm = FroxelCommon.NearCm;
     float farCm = max(FroxelCommon.FarCm, nearCm + 1e-3);
 
     depthCm = clamp(depthCm, nearCm, farCm);
+#if FROXEL_LOGARITHMIC_DEPTH
+    float t = log(depthCm / nearCm) / log(farCm / nearCm);
+#else
+    float t = (depthCm - nearCm) / (farCm - nearCm);
+#endif
 
-    float t = saturate((depthCm - nearCm) / (farCm - nearCm));
-    uint z = (uint)min(floor(t * FroxelCommon.GridSize.z), FroxelCommon.GridSize.z - 1);
+    uint z = (uint)min(floor(saturate(t) * FroxelCommon.GridSize.z), FroxelCommon.GridSize.z - 1);
+    
     return z;
+}
+
+
+bool SphereViewRectAndZ(float3 posWS, float radiusCm, matrix worldToView, matrix worldToClip, out uint2 tileMin, out uint2 tileMax, out uint zMin,
+                        out uint zMax) {
+    
+    uint4 gridSize = (uint4)FroxelCommon.GridSize;
+    float near = FroxelCommon.NearCm;
+    float far = FroxelCommon.FarCm;
+    int2 viewportSize = FroxelCommon.ViewportSize;
+    float2 invTilePx = FroxelCommon.InvTilePx;
+    
+
+    
+    float3 posVS = mul(float4(posWS, 1.0), worldToView).xyz;
+    float dCenter = abs(posVS.z);
+
+    // early out if behind near plane
+    float dMin = dCenter - radiusCm;
+    float dMax = dCenter + radiusCm;
+    if (dMax < near)
+        return false;
+    if (dMin > far)
+        return false;
+
+    // project sphere center to clip space
+
+    float4 posCS = mul(float4(posWS, 1.0), worldToClip);
+
+    if (posCS.w <= 0.0)
+        return false;
+
+    float2 ndc = posCS.xy / posCS.w; // normalized device coords [-1, 1]
+    float2 uv = ndc * 0.5f + 0.5f; // convert to [0, 1] UV
+    float2 posPx = uv * viewportSize; // to pixel space
+
+    // getting screen-space radius using the projection’s X scale (approx).
+    float projXX = abs(worldToClip[0][0]);
+    float rPx = (radiusCm * projXX) * (viewportSize.x * 0.5f) / posCS.w;
+    rPx = max(rPx, 1.0); // to avoid zero division later
+
+    // Pixel AABB
+    float2 posPxMin = posPx - rPx;
+    float2 posPxMax = posPx + rPx;
+
+    // pixel to tile (XY range)
+    uint2 tMin = (uint2)max(floor(posPxMin * invTilePx), 0.0);
+    uint2 tMax = (uint2)ceil(posPxMax * invTilePx);
+
+    tMin.x = min(tMin.x, gridSize.x - 1);
+    tMin.y = min(tMin.y, gridSize.y - 1);
+    tMax.x = min(tMax.x, gridSize.x);
+    tMax.y = min(tMax.y, gridSize.y);
+
+    // Compute Z range
+    float d0 = clamp(dMin, near, far);
+    float d1 = clamp(dMax, near, far);
+
+    uint z0 = FroxelZFromLinearDepthCm(d0);
+    uint z1 = FroxelZFromLinearDepthCm(d1);
+
+    tileMin = tMin;
+    tileMax = max(tMin + 1, tMax); // making sure at lease 1 tile is covered
+
+    zMin = min(z0, z1);
+    zMax = max(z0, z1);
+
+    return true;
 }
 
 
@@ -62,8 +148,9 @@ float3 DebugColorFromIndex(uint idx) {
     h *= 0x846ca68b;
     h ^= h >> 16;
     float3 c = float3((h) & 255u, (h >> 8) & 255u, (h >> 16) & 255u) / 255.0;
-    
+
     return c;
 }
+
 
 #endif

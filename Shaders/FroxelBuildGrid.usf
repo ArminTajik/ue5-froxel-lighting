@@ -10,7 +10,7 @@ RWStructuredBuffer<uint> FroxelGrid;
 void MainCS(uint3 DTid : SV_DispatchThreadID) {
     // Bounds check
 
-    uint idx = FroxelIndex(DTid);
+    uint idx = FroxelIndex(DTid.x, DTid.y, DTid.z);
 
     FroxelGrid[idx] = idx;
 }

@@ -143,40 +143,6 @@ void FFroxelViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass Pas
 
 }
 
-void FFroxelViewExtension::GetFrameLights(FSceneViewFamily& InViewFamily, TArray<FFroxelLightData>& OutLights) {
-    const FSceneInterface* SceneInterface = InViewFamily.Scene;
-
-    if (!SceneInterface)
-        return;
-
-    const UWorld* World = SceneInterface->GetWorld();
-    if (!World)
-        return;
-
-    for (TObjectIterator<ULightComponent> It; It; ++It) {
-        const ULightComponent* LC = *It;
-        if (!LC->IsRegistered()
-            || LC->GetWorld() != World
-            || !LC->bAffectsWorld
-            || !LC->IsVisible()
-        )
-            continue;
-
-        if (LC->GetLightType() == LightType_Directional)
-            continue;
-
-        FSphere BoundingSphere = LC->GetBoundingSphere();
-        if (BoundingSphere.W < KINDA_SMALL_NUMBER)
-            continue;
-
-        FFroxelLightData Ld;
-        Ld.PositionWS = FVector3f(BoundingSphere.Center);
-        Ld.Radius = BoundingSphere.W;
-
-        OutLights.Add(Ld);
-    }
-
-}
 
 // Passes -------------------------------------------------------------
 
@@ -194,8 +160,6 @@ void FFroxelViewExtension::CountLightPerFroxel(FRDGBuilder& GraphBuilder, FScene
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("FroxelLightCounts is null"));
         return;
     }
-
-
     
     FRDGBufferUAVRef FroxelLightCountsUAV = GraphBuilder.CreateUAV(FroxelLists.Counts);
     AddClearUAVPass(GraphBuilder, FroxelLightCountsUAV, 0u);
@@ -421,53 +385,55 @@ FScreenPassTexture FFroxelViewExtension::VisualizeFroxelOverlayPS(
     const FSceneView& View,
     const FPostProcessMaterialInputs& Inputs) {
 
+    SharedUB = FFroxelUtils::CreateSharedUB(GraphBuilder, View, GridSize_RT, NumLights_RT);
+
     FScreenPassTexture InputSceneColor(Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
-    //
-    // // FRDGTextureRef OverlayTex = BuildFroxelOverlay(GraphBuilder, View);
-    // // if (!OverlayTex)
-    // //     return InputSceneColor;
-    //
-    // const FIntRect ViewRect = View.UnconstrainedViewRect;
-    // const FScreenPassTextureViewport InputViewport(InputSceneColor);
-    // FRDGTextureRef DepthTextureRef = Inputs.SceneTextures.SceneTextures->GetParameters()->SceneDepthTexture;
-    //
-    // auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayPS::FParameters>();
-    // // Params->FroxelUB = SharedUB;
-    // // Params->Input = GetScreenPassTextureViewportParameters(InputViewport);
-    // // Params->View = View.ViewUniformBuffer;
-    // // Params->SceneTextures = Inputs.SceneTextures.SceneTextures;
-    // Params->SceneColorCopy = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(InputSceneColor.Texture));
-    // Params->SceneColorCopySampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-    // Params->SceneDepthCopy = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(DepthTextureRef));
-    // Params->SceneDepthCopySampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-    // Params->SvPositionToInputTextureUV =
-    //     FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::TexelPosition,
+    
+    // FRDGTextureRef OverlayTex = BuildFroxelOverlay(GraphBuilder, View);
+    // if (!OverlayTex)
+    //     return InputSceneColor;
+    
+    const FIntRect ViewRect = View.UnconstrainedViewRect;
+    const FScreenPassTextureViewport InputViewport(InputSceneColor);
+    FRDGTextureRef DepthTextureRef = Inputs.SceneTextures.SceneTextures->GetParameters()->SceneDepthTexture;
+    
+    auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayPS::FParameters>();
+    Params->FroxelSharedUB = SharedUB;
+    Params->Input = GetScreenPassTextureViewportParameters(InputViewport);
+    Params->View = View.ViewUniformBuffer;
+    Params->SceneTextures = Inputs.SceneTextures.SceneTextures;
+    Params->SceneColorCopy = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(InputSceneColor.Texture));
+    Params->SceneColorCopySampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+    Params->SceneDepthCopy = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(DepthTextureRef));
+    Params->SceneDepthCopySampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+    Params->SvPositionToInputTextureUV =
+        FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::TexelPosition,
+                                                   FScreenTransform::ETextureBasis::ViewportUV) *
+        FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::ViewportUV,
+                                                   FScreenTransform::ETextureBasis::TextureUV);
+    Params->RenderTargets[0] = FRenderTargetBinding(InputSceneColor.Texture, ERenderTargetLoadAction::ELoad);
+    
+    // Params->SvPositionToDepthUV = FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::TexelPosition,
     //                                                FScreenTransform::ETextureBasis::ViewportUV) *
     //     FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::ViewportUV,
     //                                                FScreenTransform::ETextureBasis::TextureUV);
-    // Params->RenderTargets[0] = FRenderTargetBinding(InputSceneColor.Texture, ERenderTargetLoadAction::ELoad);
-    //
-    // // Params->SvPositionToDepthUV = FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::TexelPosition,
-    // //                                                FScreenTransform::ETextureBasis::ViewportUV) *
-    // //     FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::ViewportUV,
-    // //                                                FScreenTransform::ETextureBasis::TextureUV);
-    //
-    // FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-    // TShaderMapRef<FFroxelOverlayPS> PixelShader(GlobalShaderMap);
-    //
-    // FPixelShaderUtils::AddFullscreenPass(
-    //     GraphBuilder,
-    //     GlobalShaderMap,
-    //     RDG_EVENT_NAME("FroxelOverlay (FPixelShaderUtils)"),
-    //     PixelShader,
-    //     Params,
-    //     ViewRect);
-    //
+    
+    FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+    TShaderMapRef<FFroxelOverlayPS> PixelShader(GlobalShaderMap);
+    
+    FPixelShaderUtils::AddFullscreenPass(
+        GraphBuilder,
+        GlobalShaderMap,
+        RDG_EVENT_NAME("FroxelOverlay (FPixelShaderUtils)"),
+        PixelShader,
+        Params,
+        ViewRect);
+    
     return InputSceneColor;
 }
 
 
-// temp for testing
+// temp for reference (readback)
 void FFroxelViewExtension::BuildFroxelGrid(FRDGBuilder& GraphBuilder, const FSceneView& InView) {
 
     const ERDGPassFlags RDGPassFlags = ERDGPassFlags::Compute | ERDGPassFlags::NeverCull;
@@ -645,4 +611,44 @@ void FFroxelViewExtension::VisualizeFroxelGrid(FRDGBuilder& GraphBuilder, const 
     //     PixelShader,
     //     Params,
     //     ViewRect);
+}
+
+// Helpers -------------------------------------------------------------
+
+/**
+ * Collect all lights in the scene that affect the world and are visible.
+ **/
+void FFroxelViewExtension::GetFrameLights(FSceneViewFamily& InViewFamily, TArray<FFroxelLightData>& OutLights) {
+    const FSceneInterface* SceneInterface = InViewFamily.Scene;
+
+    if (!SceneInterface)
+        return;
+
+    const UWorld* World = SceneInterface->GetWorld();
+    if (!World)
+        return;
+
+    for (TObjectIterator<ULightComponent> It; It; ++It) {
+        const ULightComponent* LC = *It;
+        if (!LC->IsRegistered()
+            || LC->GetWorld() != World
+            || !LC->bAffectsWorld
+            || !LC->IsVisible()
+        )
+            continue;
+
+        if (LC->GetLightType() == LightType_Directional)
+            continue;
+
+        FSphere BoundingSphere = LC->GetBoundingSphere();
+        if (BoundingSphere.W < KINDA_SMALL_NUMBER)
+            continue;
+
+        FFroxelLightData Ld;
+        Ld.PositionWS = FVector3f(BoundingSphere.Center);
+        Ld.Radius = BoundingSphere.W;
+
+        OutLights.Add(Ld);
+    }
+
 }

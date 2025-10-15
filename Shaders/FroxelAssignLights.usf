@@ -24,15 +24,14 @@ void MainCS(uint3 DTid : SV_DispatchThreadID) {
 
     uint2 tMin, tMax;
     uint zMin, zMax;
-    matrix view = View.TranslatedWorldToView;
-    matrix clip = View.TranslatedWorldToClip;
-    FroxelLightIndices[0] = view[3][2];
     
     if (!SphereViewRectAndZ(
     light.PositionWS,
     light.Radius,
-    view,
-    clip,
+    View.PreViewTranslationLow,
+    View.TranslatedWorldToView,
+    View.TranslatedWorldToClip,
+    View.ViewRectMinAndSize,
     tMin,
     tMax,
     zMin,

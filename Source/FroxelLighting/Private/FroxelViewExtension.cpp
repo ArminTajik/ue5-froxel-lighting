@@ -3,7 +3,7 @@
 #include "FroxelUtils.h"
 
 // Shaders
-#include "Shaders/FroxelOverlay.h"
+#include "Shaders/FroxelOverlayShaders.h"
 #include "Shaders/FroxelBuildGridCS.h"
 #include "Shaders/FroxelCountCS.h"
 #include "Shaders/FroxelOffsetCS.h"
@@ -36,8 +36,9 @@ extern TAutoConsoleVariable<int32> CVarFroxelVisualize;
 extern TAutoConsoleVariable<int32> CVarFroxelMaxLightsPerFroxel;
 extern TAutoConsoleVariable<int32> CVarFroxelFarClipCm;
 extern TAutoConsoleVariable<int32> CVarFroxelZMode;
+extern TAutoConsoleVariable<float> CVarFroxelDebugOpacity;
 
-// FFroxelViewExtension implementation --------------------------------------------
+#pragma region Extension Implementation
 void FFroxelViewExtension::SetupViewFamily(FSceneViewFamily& InViewFamily) {
     FSceneViewExtensionBase::SetupViewFamily(InViewFamily);
 
@@ -71,12 +72,6 @@ void FFroxelViewExtension::PreRenderViewFamily_RenderThread(FRDGBuilder& GraphBu
     }
 }
 
-
-void FFroxelViewExtension::PreRenderView_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView) {
-    FSceneViewExtensionBase::PreRenderView_RenderThread(GraphBuilder, InView);
-
-}
-
 void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView,
                                                                    const FRenderTargetBindingSlots& RenderTargets,
                                                                    TRDGUniformBufferRef<FSceneTextureUniformParameters>
@@ -84,12 +79,11 @@ void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& 
     FSceneViewExtensionBase::
         PostRenderBasePassDeferred_RenderThread(GraphBuilder, InView, RenderTargets, SceneTextures);
 
-    // early out
     if (NumLights_RT == 0) {
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("No lights to froxelize"));
         return;
     }
-
+    
     TArray<FFroxelLightData> LightsInView;
     LightsInView.Reserve(NumLights_RT);
     for (const auto& L : FrameLights_RT) {
@@ -97,15 +91,15 @@ void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& 
             LightsInView.Add(L);
         }
     }
-
+    
     const uint32 NumLightsInView = LightsInView.Num();
-    if (NumLightsInView == 0) {
-        UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("No lights in view frustum"));
-        return;
-    }
-
+    // if (NumLightsInView == 0) {
+    //     UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("No lights in view frustum"));
+    //     return;
+    // }
+    
     constexpr uint32 Stride = sizeof(FFroxelLightData);
-
+    
     LightsSB = CreateStructuredBuffer(
         GraphBuilder,
         TEXT("LightsSB"),
@@ -113,17 +107,21 @@ void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& 
         NumLightsInView,
         LightsInView.GetData(),
         Stride * NumLightsInView);
-
-
+    
     RDG_GPU_STAT_SCOPE(GraphBuilder, Froxel);
     RDG_EVENT_SCOPE(GraphBuilder, "FroxelScope");
     
     FroxelLists = FFroxelUtils::CreateFroxelLists(GraphBuilder, GridSize_RT,
                                                   CVarFroxelMaxLightsPerFroxel.GetValueOnRenderThread());
     SharedUB = FFroxelUtils::CreateSharedUB(GraphBuilder, InView, GridSize_RT, NumLightsInView);
+    
+    
+    
     CountLightPerFroxel(GraphBuilder, InView);
-    ComputeFroxelOffset(GraphBuilder, InView);
-    ComputeLightIndices(GraphBuilder, InView);
+    // ComputeFroxelOffset(GraphBuilder, InView);
+    // ComputeLightIndices(GraphBuilder, InView);
+    
+
 }
 
 
@@ -135,7 +133,7 @@ void FFroxelViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass Pas
     if (CVarFroxelVisualize.GetValueOnRenderThread() == 0) {
         return;
     }
-    
+
     if (Pass == EPostProcessingPass::Tonemap && bIsPassEnabled) {
         InOutPassCallbacks.Add(
             FPostProcessingPassDelegate::CreateRaw(this, &FFroxelViewExtension::VisualizeFroxelOverlayPS));
@@ -143,15 +141,16 @@ void FFroxelViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass Pas
 
 }
 
-
-// Passes -------------------------------------------------------------
+#pragma endregion
+#pragma region Shader Implementations
 
 /**
  * Count the number of lights affecting each froxel.
  * The result is stored in FroxelLightCountsUAV buffer and returned as an RDG buffer to pass to the next stage.
  **/
-void FFroxelViewExtension::CountLightPerFroxel(FRDGBuilder& GraphBuilder, FSceneView& InView) {
+void FFroxelViewExtension::CountLightPerFroxel(FRDGBuilder& GraphBuilder, const FSceneView& InView) {
 
+    UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("CountLightPerFroxel called (NumLights = %u)"), NumLights_RT);
     if (!LightsSB) {
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("Lights is null"));
         return;
@@ -160,7 +159,7 @@ void FFroxelViewExtension::CountLightPerFroxel(FRDGBuilder& GraphBuilder, FScene
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("FroxelLightCounts is null"));
         return;
     }
-    
+
     FRDGBufferUAVRef FroxelLightCountsUAV = GraphBuilder.CreateUAV(FroxelLists.Counts);
     AddClearUAVPass(GraphBuilder, FroxelLightCountsUAV, 0u);
 
@@ -196,7 +195,7 @@ void FFroxelViewExtension::CountLightPerFroxel(FRDGBuilder& GraphBuilder, FScene
  * 2. Prefix sum (scan) each z-slice group sums.
  * 3. Add the z-slice group sums to each froxel in the z-slice.
  **/
-void FFroxelViewExtension::ComputeFroxelOffset(FRDGBuilder& GraphBuilder, FSceneView& InView) {
+void FFroxelViewExtension::ComputeFroxelOffset(FRDGBuilder& GraphBuilder,const FSceneView& InView) {
 
     if (!FroxelLists.Counts) {
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("FroxelLightCounts is null"));
@@ -293,7 +292,7 @@ void FFroxelViewExtension::ComputeFroxelOffset(FRDGBuilder& GraphBuilder, FScene
  * Compute the list of light indices for each froxel.
  * The result is stored in FroxelLists.LightIndices buffer.
  **/
-void FFroxelViewExtension::ComputeLightIndices(FRDGBuilder& GraphBuilder, FSceneView& InView) {
+void FFroxelViewExtension::ComputeLightIndices(FRDGBuilder& GraphBuilder, const FSceneView& InView) {
     if (!LightsSB) {
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("Lights is null"));
         return;
@@ -314,26 +313,26 @@ void FFroxelViewExtension::ComputeLightIndices(FRDGBuilder& GraphBuilder, FScene
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("TotalIndices is null"));
         return;
     }
-    
+
     const int32 GX = GridSize_RT.X;
     const int32 GY = GridSize_RT.Y;
     const int32 GZ = GridSize_RT.Z;
     const uint32 GCOUNT = GridCount_RT;
-    
+
     // Compute total number of indices
     {
         FRDGBufferUAVRef TotalIndicesUAV = GraphBuilder.CreateUAV(FroxelLists.TotalIndices);
         AddClearUAVPass(GraphBuilder, TotalIndicesUAV, 0u);
-    
+
         auto* Params = GraphBuilder.AllocParameters<FFroxelTotalIndicesCS::FParameters>();
         Params->FroxelSharedUB = SharedUB;
         Params->FroxelLightCounts = GraphBuilder.CreateSRV(FroxelLists.Counts);
         Params->FroxelLightOffsets = GraphBuilder.CreateSRV(FroxelLists.Offsets);
         Params->TotalIndices = TotalIndicesUAV;
-    
+
         const TShaderMapRef<FFroxelTotalIndicesCS> ComputeShader(GetGlobalShaderMap(InView.GetFeatureLevel()));
         const FIntVector Groups = FIntVector(1, 1, 1);
-    
+
         FComputeShaderUtils::AddPass(
             GraphBuilder,
             RDG_EVENT_NAME("Froxel Ligthing: Compute Total Indices"),
@@ -343,28 +342,28 @@ void FFroxelViewExtension::ComputeLightIndices(FRDGBuilder& GraphBuilder, FScene
             Groups
             );
     }
-    
+
     // compute light indices
     {
-    
+
         FRDGBufferUAVRef FroxelLightIndicesUAV = GraphBuilder.CreateUAV(FroxelLists.LightIndices);
         FRDGBufferUAVRef FroxelHeadsUAV = GraphBuilder.CreateUAV(FroxelLists.Counts); // reusing counts buffer as heads
         AddClearUAVPass(GraphBuilder, FroxelLightIndicesUAV, 0u);
         AddClearUAVPass(GraphBuilder, FroxelHeadsUAV, 0u);
-    
+
         auto* Params = GraphBuilder.AllocParameters<FFroxelAssignLightsCS::FParameters>();
-    
+
         Params->FroxelSharedUB = SharedUB;
         Params->View = InView.ViewUniformBuffer;
         Params->Lights = GraphBuilder.CreateSRV(LightsSB);
         Params->FroxelLightOffsets = GraphBuilder.CreateSRV(FroxelLists.Offsets);
         Params->TotalIndices = GraphBuilder.CreateSRV(FroxelLists.TotalIndices);
         Params->FroxelHeads = FroxelHeadsUAV;
-        Params->FroxelLightIndices  = FroxelLightIndicesUAV;
-    
+        Params->FroxelLightIndices = FroxelLightIndicesUAV;
+
         const TShaderMapRef<FFroxelAssignLightsCS> ComputeShader(GetGlobalShaderMap(InView.GetFeatureLevel()));
         const FIntVector Groups(FComputeShaderUtils::GetGroupCount(NumLights_RT, 64));
-    
+
         FComputeShaderUtils::AddPass(
             GraphBuilder,
             RDG_EVENT_NAME("Froxel Ligthing: Assign Lights (NumLights = %u)", NumLights_RT),
@@ -384,51 +383,100 @@ FScreenPassTexture FFroxelViewExtension::VisualizeFroxelOverlayPS(
     FRDGBuilder& GraphBuilder,
     const FSceneView& View,
     const FPostProcessMaterialInputs& Inputs) {
+    
+    FScreenPassTexture InputSceneColor(Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
+    
+    const int32 Mode = CVarFroxelVisualize.GetValueOnRenderThread();
+    if (Mode == 0) {
+        return InputSceneColor;
+    }
 
     SharedUB = FFroxelUtils::CreateSharedUB(GraphBuilder, View, GridSize_RT, NumLights_RT);
 
-    FScreenPassTexture InputSceneColor(Inputs.GetInput(EPostProcessMaterialInput::SceneColor));
-    
-    // FRDGTextureRef OverlayTex = BuildFroxelOverlay(GraphBuilder, View);
-    // if (!OverlayTex)
-    //     return InputSceneColor;
-    
     const FIntRect ViewRect = View.UnconstrainedViewRect;
     const FScreenPassTextureViewport InputViewport(InputSceneColor);
-    FRDGTextureRef DepthTextureRef = Inputs.SceneTextures.SceneTextures->GetParameters()->SceneDepthTexture;
-    
-    auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayPS::FParameters>();
-    Params->FroxelSharedUB = SharedUB;
-    Params->Input = GetScreenPassTextureViewportParameters(InputViewport);
-    Params->View = View.ViewUniformBuffer;
-    Params->SceneTextures = Inputs.SceneTextures.SceneTextures;
-    Params->SceneColorCopy = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(InputSceneColor.Texture));
-    Params->SceneColorCopySampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-    Params->SceneDepthCopy = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(DepthTextureRef));
-    Params->SceneDepthCopySampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-    Params->SvPositionToInputTextureUV =
-        FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::TexelPosition,
-                                                   FScreenTransform::ETextureBasis::ViewportUV) *
-        FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::ViewportUV,
-                                                   FScreenTransform::ETextureBasis::TextureUV);
-    Params->RenderTargets[0] = FRenderTargetBinding(InputSceneColor.Texture, ERenderTargetLoadAction::ELoad);
-    
-    // Params->SvPositionToDepthUV = FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::TexelPosition,
-    //                                                FScreenTransform::ETextureBasis::ViewportUV) *
-    //     FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::ViewportUV,
-    //                                                FScreenTransform::ETextureBasis::TextureUV);
-    
+    const FRDGTextureRef DepthTextureRef = Inputs.SceneTextures.SceneTextures->GetParameters()->SceneDepthTexture;
+    const FRDGTextureSRVRef SceneColorSRV = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(InputSceneColor.Texture));
+    const FRDGTextureSRVRef SceneDepthSRV = GraphBuilder.CreateSRV(DepthTextureRef);
+    const FScreenTransform SvPositionToInputTextureUV = FScreenTransform::ChangeTextureBasisFromTo(
+                                                            InputViewport,
+                                                            FScreenTransform::ETextureBasis::TexelPosition,
+                                                            FScreenTransform::ETextureBasis::ViewportUV) *
+                                                        FScreenTransform::ChangeTextureBasisFromTo(
+                                                            InputViewport, FScreenTransform::ETextureBasis::ViewportUV,
+                                                            FScreenTransform::ETextureBasis::TextureUV);
+    const float OverlayOpacity = CVarFroxelDebugOpacity.GetValueOnRenderThread();
+    FRHISamplerState* SamplerState = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
     FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-    TShaderMapRef<FFroxelOverlayPS> PixelShader(GlobalShaderMap);
-    
-    FPixelShaderUtils::AddFullscreenPass(
-        GraphBuilder,
-        GlobalShaderMap,
-        RDG_EVENT_NAME("FroxelOverlay (FPixelShaderUtils)"),
-        PixelShader,
-        Params,
-        ViewRect);
-    
+    FScreenPassTextureViewportParameters Input = GetScreenPassTextureViewportParameters(InputViewport);
+    FRenderTargetBinding RenderTargetBinding = FRenderTargetBinding(InputSceneColor.Texture,
+                                                                    ERenderTargetLoadAction::ELoad);
+
+    // hash mode
+    if (Mode == 1) {
+
+        auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayHashPS::FParameters>();
+
+        Params->FroxelSharedUB = SharedUB;
+        Params->Input = Input;
+        Params->View = View.ViewUniformBuffer;
+        Params->SceneColorCopy = SceneColorSRV;
+        Params->SceneColorCopySampler = SamplerState;
+        Params->SceneDepthCopy = SceneDepthSRV;
+        Params->SceneDepthCopySampler = SamplerState;
+        Params->SvPositionToInputTextureUV = SvPositionToInputTextureUV;
+        Params->OverlayOpacity = OverlayOpacity;
+        Params->RenderTargets[0] = RenderTargetBinding;
+
+        const TShaderMapRef<FFroxelOverlayHashPS> PixelShader(GlobalShaderMap);
+
+        FPixelShaderUtils::AddFullscreenPass(
+            GraphBuilder,
+            GlobalShaderMap,
+            RDG_EVENT_NAME("FroxelOverlay Hash (FPixelShaderUtils)"),
+            PixelShader,
+            Params,
+            ViewRect);
+
+        return InputSceneColor;
+    }
+
+    // heatmap mode
+    if (Mode == 2 && NumLights_RT > 0) {
+
+        auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayHeatmapPS::FParameters>();
+
+        if (!FroxelLists.Counts || !FroxelLists.Offsets || !FroxelLists.LightIndices) {
+            UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("Froxel buffers are null"));
+            return InputSceneColor;
+        }
+
+        Params->FroxelLightCounts = GraphBuilder.CreateSRV(FroxelLists.Counts);
+        Params->FroxelLightOffsets = GraphBuilder.CreateSRV(FroxelLists.Offsets);
+        Params->FroxelLightIndices = GraphBuilder.CreateSRV(FroxelLists.LightIndices);
+        Params->FroxelSharedUB = SharedUB;
+        Params->SceneColorCopy = SceneColorSRV;
+        Params->SceneColorCopySampler = SamplerState;
+        Params->SceneDepthCopy = SceneDepthSRV;
+        Params->SceneDepthCopySampler = SamplerState;
+        Params->SvPositionToInputTextureUV = SvPositionToInputTextureUV;
+        Params->OverlayOpacity = OverlayOpacity;
+        Params->Input = Input;
+        Params->View = View.ViewUniformBuffer;
+        Params->RenderTargets[0] = RenderTargetBinding;
+
+        const TShaderMapRef<FFroxelOverlayHeatmapPS> PixelShader(GlobalShaderMap);
+
+        FPixelShaderUtils::AddFullscreenPass(
+            GraphBuilder,
+            GlobalShaderMap,
+            RDG_EVENT_NAME("FroxelOverlay Heatmap (FPixelShaderUtils)"),
+            PixelShader,
+            Params,
+            ViewRect);
+
+        return InputSceneColor;
+    }
     return InputSceneColor;
 }
 
@@ -521,7 +569,7 @@ void FFroxelViewExtension::BuildFroxelGrid(FRDGBuilder& GraphBuilder, const FSce
     UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("[Froxel] BuildFroxelGrid finished"));
 }
 
-// Temp for testing
+// Temp for reference
 void FFroxelViewExtension::VisualizeFroxelGrid(FRDGBuilder& GraphBuilder, const FSceneView& InView) {
 
     // extern TAutoConsoleVariable<int32> CVarFroxelVisualize;
@@ -613,7 +661,8 @@ void FFroxelViewExtension::VisualizeFroxelGrid(FRDGBuilder& GraphBuilder, const 
     //     ViewRect);
 }
 
-// Helpers -------------------------------------------------------------
+#pragma endregion
+#pragma region Helpers
 
 /**
  * Collect all lights in the scene that affect the world and are visible.
@@ -652,3 +701,5 @@ void FFroxelViewExtension::GetFrameLights(FSceneViewFamily& InViewFamily, TArray
     }
 
 }
+
+#pragma endregion

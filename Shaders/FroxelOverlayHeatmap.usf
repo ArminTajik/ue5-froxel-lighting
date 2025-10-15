@@ -1,0 +1,59 @@
+/*=============================================================================
+FroxelOverlayHeatmap.usf - Fullscreen overlay (raster PS) compositing over SceneColor
+It shows a heatmap of the number of lights affecting each froxel.
+=============================================================================*/
+#include "FroxelOverlayCommon.ush"
+
+SCREEN_PASS_TEXTURE_VIEWPORT(Input)
+Texture2D SceneColorCopy;
+SamplerState SceneColorCopySampler;
+FScreenTransform SvPositionToInputTextureUV;
+Texture2D SceneDepthCopy;
+SamplerState SceneDepthCopySampler;
+float OverlayOpacity;
+
+StructuredBuffer<uint> FroxelLightCounts;
+StructuredBuffer<uint> FroxelLightOffsets;
+StructuredBuffer<uint> FroxelLightIndices;
+
+uint SafeOffset(uint fidx) {
+    uint last = FroxelCommon.GridSize.w - 1;
+    return FroxelLightOffsets[min(fidx, last)];
+}
+
+uint FroxelCountFromOffsets(uint fidx) {
+    uint last = FroxelCommon.GridSize.w - 1;
+    uint current = FroxelLightOffsets[min(fidx, last)];
+    uint next = FroxelLightOffsets[min(fidx + 1, last)];
+    return next - current;
+}
+
+void MainPS(
+    float4 SvPosition : SV_POSITION,
+    out float4 OutColor : SV_Target0) {
+
+    const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
+    float2 ViewportUV = (int2(SvPosition.xy) - Input_ViewportMin) * Input_ViewportSizeInverse;
+
+    float4 scene = Texture2DSample(SceneColorCopy, SceneColorCopySampler, UV);
+
+    uint3 g = ResolveFroxelCoord(UV, SceneDepthCopy, SceneDepthCopySampler);
+    uint fidx = FroxelIndexSafe(g);
+
+    // #if USE_FROXEL_COUNTS
+    //     uint count = FroxelCounts[fidx];
+    // #else
+    //     uint count = FroxelCountFromOffsets(fidx);
+    // #endif
+    //
+    uint count = FroxelLightCounts[fidx];
+    float t = saturate(count / 8.0f);
+    float3 heat = lerp(float3(0.0, 0.0, 1.0), float3(1.0, 0.0, 0.0), saturate(t * 2));
+    heat = lerp(heat, float3(1.0, 0.0, 0.0), saturate((t - 0.5) * 2));
+
+    float3 outRGB = lerp(scene.rgb, heat, OverlayOpacity);
+
+    OutColor = float4(outRGB, 1.0);
+    // OutColor = float4(1, 0, 1, 1);
+    // OutColor = scene;
+}

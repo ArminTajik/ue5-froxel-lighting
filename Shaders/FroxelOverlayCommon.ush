@@ -1,0 +1,47 @@
+/*=============================================================================
+    FroxelOverlay.usf - Fullscreen overlay (raster PS) compositing over SceneColor
+    =============================================================================*/
+#pragma once
+
+#ifndef FROXEL_OVERLAY_COMMON_USH
+#define FROXEL_OVERLAY_COMMON_USH
+
+#include "FroxelCommon.ush"
+#include "/Engine/Private/ScreenPass.ush"
+#include "/Engine/Private/SceneTextureParameters.ush"
+#include "/Engine/Generated/GeneratedUniformBuffers.ush"
+
+// #include "/Engine/Private/SceneTexturesCommon.ush"
+
+
+float GetLinearDepthProj(float2 uvViewport, Texture2D DepthTexture, SamplerState DepthSampler) {
+    // float DeviceZ = Texture2DSampleLevel(SceneTexturesStruct.SceneDepthTexture,
+    //                                      SceneTexturesStruct_SceneDepthTextureSampler, ScreenUV, 0).r;
+    float DeviceZ = Texture2DSample(DepthTexture, DepthSampler, uvViewport).r;
+    return ConvertFromDeviceZ(DeviceZ);
+}
+
+uint ResolveZSliceFromViewportUV(float2 uvViewport, Texture2D DepthTexture, SamplerState DepthSampler) {
+    float ViewDepth = GetLinearDepthProj(uvViewport, DepthTexture, DepthSampler);
+    return FroxelZFromLinearDepthCm(ViewDepth);
+}
+
+uint3 ResolveFroxelCoord(float2 uvViewport, Texture2D DepthTexture, SamplerState DepthSampler) {
+    uint z = ResolveZSliceFromViewportUV(uvViewport, DepthTexture, DepthSampler);
+    uint2 tile = uint2(uvViewport * FroxelCommon.GridSize.xy);
+    tile = min(tile, FroxelCommon.GridSize.xy - 1);
+    return uint3(tile, z);
+}
+
+float3 HashRGB(uint idx) {
+    uint h = idx;
+    h ^= h >> 16;
+    h *= 0x7feb352d;
+    h ^= h >> 15;
+    h *= 0x846ca68b;
+    h ^= h >> 16;
+    float3 c = float3((h) & 255u, (h >> 8) & 255u, (h >> 16) & 255u) / 255.0;
+
+    return c;
+}
+#endif

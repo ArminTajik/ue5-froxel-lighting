@@ -20,6 +20,6 @@ class FFroxelCountCS : public FGlobalShader {
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters&) {
-        return true; // compile for all RHIs
+        return true;
     }
 };

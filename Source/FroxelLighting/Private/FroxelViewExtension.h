@@ -25,14 +25,17 @@ public:
     virtual void PreRenderViewFamily_RenderThread(FRDGBuilder& GraphBuilder, FSceneViewFamily& InViewFamily) override;
 
 
-    virtual void PreRenderView_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView) override;
+    virtual void PreRenderView_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView) override {
+    }
 
-    virtual void PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView, const FRenderTargetBindingSlots& RenderTargets, TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures) override;
-    
+    virtual void PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView,
+                                                         const FRenderTargetBindingSlots& RenderTargets,
+                                                         TRDGUniformBufferRef<FSceneTextureUniformParameters>
+                                                         SceneTextures) override;
+
     virtual void PostRenderView_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView) override {
     }
 
-    
 
     virtual void PrePostProcessPass_RenderThread(FRDGBuilder& GraphBuilder, const FSceneView& InView,
                                                  const FPostProcessingInputs& Inputs) override {
@@ -44,16 +47,15 @@ public:
 
 private:
     static void GetFrameLights(FSceneViewFamily& InViewFamily, TArray<FFroxelLightData>& OutLights);
-    void CountLightPerFroxel(FRDGBuilder& GraphBuilder, FSceneView& InView);
-    void ComputeFroxelOffset(FRDGBuilder& GraphBuilder, FSceneView& InView);
-    void ComputeLightIndices(FRDGBuilder& GraphBuilder, FSceneView& InView);
+    void CountLightPerFroxel(FRDGBuilder& GraphBuilder, const FSceneView& InView);
+    void ComputeFroxelOffset(FRDGBuilder& GraphBuilder, const FSceneView& InView);
+    void ComputeLightIndices(FRDGBuilder& GraphBuilder, const FSceneView& InView);
 
     void BuildFroxelGrid(FRDGBuilder& GraphBuilder, const FSceneView& InView);
     FScreenPassTexture VisualizeFroxelOverlayPS(FRDGBuilder& GraphBuilder,
                                                 const FSceneView& View, const FPostProcessMaterialInputs& Inputs);
 
     void VisualizeFroxelGrid(FRDGBuilder& GraphBuilder, const FSceneView& InView);
-
 
 
     // Build light grid data ---------------------------------

@@ -29,8 +29,8 @@ TUniformBufferRef<FFroxelUniformParameters> FFroxelUtils::CreateSharedUB(
     Params->NumLights = NumLights;
     Params->MaxLightsPerFroxel = FMath::Max(1, CVarFroxelMaxLightsPerFroxel.GetValueOnRenderThread());
     Params->ViewportSize = InView.UnscaledViewRect.Size();
-    
-    
+    Params->ViewRectMinPx = InView.UnscaledViewRect.Min;
+
     FVector2f TileSizeF = FVector2f(Params->ViewportSize) / FVector2f(GX, GY);
     TileSizeF = FVector2f(
         FMath::Max(TileSizeF.X, 1.0f),
@@ -42,6 +42,9 @@ TUniformBufferRef<FFroxelUniformParameters> FFroxelUtils::CreateSharedUB(
         );
     Params->TileSizePx = TileSize;
     Params->InvTilePx = FVector2f(1.0f) / FVector2f(TileSize);
+    Params->ViewMatrix = FMatrix44f(InView.ViewMatrices.GetViewMatrix());
+    Params->ProjectionMatrix = FMatrix44f(InView.ViewMatrices.GetProjectionMatrix());
+    
 
     // Create an immediate UB for this **frame**
     TUniformBufferRef<FFroxelUniformParameters> FroxelUB =
@@ -58,21 +61,22 @@ FFroxelLists FFroxelUtils::CreateFroxelLists(FRDGBuilder& GraphBuilder, FIntVect
     const uint32 FroxelCount = Grid.X * Grid.Y * Grid.Z;
     Lists.FroxelCount = FroxelCount;
 
-    Lists.Counts = GraphBuilder.CreateBuffer(
-        FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FroxelCount),
-        TEXT("FroxelLists.Counts"));
+    FRDGBufferDesc CountsDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FroxelCount);
+    CountsDesc.Usage |= BUF_ShaderResource | BUF_UnorderedAccess;
+    Lists.Counts = GraphBuilder.CreateBuffer(CountsDesc, TEXT("FroxelLists.Counts"));
 
-    Lists.Offsets = GraphBuilder.CreateBuffer(
-        FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FroxelCount),
-        TEXT("FroxelLists.Offsets"));
+    FRDGBufferDesc OffsetsDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FroxelCount);
+    OffsetsDesc.Usage |= BUF_ShaderResource | BUF_UnorderedAccess;
+    Lists.Offsets = GraphBuilder.CreateBuffer(OffsetsDesc, TEXT("FroxelLists.Offsets"));
 
-    Lists.TotalIndices = GraphBuilder.CreateBuffer(
-        FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1),
-        TEXT("FroxelLists.TotalIndices"));
+    FRDGBufferDesc TotalIndicesDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
+    TotalIndicesDesc.Usage |= BUF_ShaderResource | BUF_UnorderedAccess;
+    Lists.TotalIndices = GraphBuilder.CreateBuffer(TotalIndicesDesc, TEXT("FroxelLists.TotalIndices"));
 
-    Lists.LightIndices = GraphBuilder.CreateBuffer(
-        FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FroxelCount * MaxLightsPerFroxel),
-        TEXT("FroxelLists.LightIndices"));
+    FRDGBufferDesc LightIndicesDesc = FRDGBufferDesc::CreateStructuredDesc(
+        sizeof(uint32), FroxelCount * MaxLightsPerFroxel);
+    LightIndicesDesc.Usage |= BUF_ShaderResource | BUF_UnorderedAccess;
+    Lists.LightIndices = GraphBuilder.CreateBuffer(LightIndicesDesc, TEXT("FroxelLists.LightIndices"));
 
     return Lists;
 }

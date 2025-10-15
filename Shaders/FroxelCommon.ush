@@ -1,7 +1,7 @@
 /*=============================================================================
         FroxelCommon.ush - Common shader code for froxel lighting
 =============================================================================*/
-#pragma once
+// #pragma once replaced with ifndef/define
 
 #ifndef FROXEL_COMMON_USH
 #define FROXEL_COMMON_USH
@@ -32,7 +32,7 @@ uint FroxelIndex(uint gx, uint gy, uint gz) {
     return gx + gy * (uint)FroxelCommon.GridSize.x + gz * (uint)FroxelCommon.GridSize.x * (uint)FroxelCommon.GridSize.y;
 }
 
-uint FroxelIndexClamped(uint3 g) {
+uint FroxelIndexSafe(uint3 g) {
     uint idx = FroxelIndex(g.x, g.y, g.z);
     return min(idx, (uint)(FroxelCommon.GridSize.w - 1));
 }
@@ -67,48 +67,68 @@ uint FroxelZFromLinearDepthCm(float depthCm) {
 #endif
 
     uint z = (uint)min(floor(saturate(t) * FroxelCommon.GridSize.z), FroxelCommon.GridSize.z - 1);
-    
+
     return z;
 }
 
 
-bool SphereViewRectAndZ(float3 posWS, float radiusCm, matrix worldToView, matrix worldToClip, out uint2 tileMin, out uint2 tileMax, out uint zMin,
+bool SphereViewRectAndZ(float3 posWS, float radiusCm, float3 preViewTranslationLow, matrix worldToView,
+                        matrix worldToClip, uint4 viewRectMinAndSize, out uint2 tileMin, out uint2 tileMax,
+                        out uint zMin,
                         out uint zMax) {
-    
+
     uint4 gridSize = (uint4)FroxelCommon.GridSize;
     float near = FroxelCommon.NearCm;
     float far = FroxelCommon.FarCm;
-    int2 viewportSize = FroxelCommon.ViewportSize;
+    uint2 viewRectSize = FroxelCommon.ViewportSize;
+    // uint2  viewRectMin  = viewRectMinAndSize.xy;
+    // uint2  viewRectSize = viewRectMinAndSize.zw;
     float2 invTilePx = FroxelCommon.InvTilePx;
-    
 
-    
-    float3 posVS = mul(float4(posWS, 1.0), worldToView).xyz;
-    float dCenter = abs(posVS.z);
+    // worldToView = FroxelCommon.ViewMatrix;
+    // worldToClip = FroxelCommon.ProjectionMatrix;
+    // int2 viewRectMin = FroxelCommon.ViewRectMinPx;
+    float3 posTW = posWS + preViewTranslationLow;
+    // posWS + preViewTranslationLow;
+    // float3 posTW = posWS;
+    float3 posVS = mul(float4(posTW, 1.0), worldToView).xyz;
+    float4 posCS = mul(float4(posTW, 1.0), worldToClip);
+
+    // hardcoded posCS
+
+    float dCenter = -posVS.z;
 
     // early out if behind near plane
     float dMin = dCenter - radiusCm;
     float dMax = dCenter + radiusCm;
-    if (dMax < near)
-        return false;
-    if (dMin > far)
-        return false;
+    // if (dMax < near)
+    //     return false;
+    // if (dMin > far)
+    //     return false;
 
     // project sphere center to clip space
 
-    float4 posCS = mul(float4(posWS, 1.0), worldToClip);
-
-    if (posCS.w <= 0.0)
-        return false;
+    // if (posCS.w <= 0.0)
+    //     return false;
 
     float2 ndc = posCS.xy / posCS.w; // normalized device coords [-1, 1]
     float2 uv = ndc * 0.5f + 0.5f; // convert to [0, 1] UV
-    float2 posPx = uv * viewportSize; // to pixel space
+    float2 posPx = uv * viewRectSize; // to pixel space
+    // float2 uv  = float2(0.5, 0.5);
+    // float2 posPx = uv * viewportSize;
 
     // getting screen-space radius using the projection’s X scale (approx).
     float projXX = abs(worldToClip[0][0]);
-    float rPx = (radiusCm * projXX) * (viewportSize.x * 0.5f) / posCS.w;
-    rPx = max(rPx, 1.0); // to avoid zero division later
+    float rPx = (radiusCm * 100.0 * projXX) * (viewRectSize.x * 0.5f) / posCS.w;
+    rPx = max(rPx, 0.5f); // to avoid zero division later
+
+    // rPx = 10.0f; // TEMP for testing
+
+    // // getting screen-space radius using derivative (more accurate)
+    // float2 dx = ddx(posPx);
+    // float2 dy = ddy(posPx);
+    // float rPx = length(dx) + length(dy);
+    // rPx = max(rPx * radiusCm, 0.5f); // to avoid zero division later
 
     // Pixel AABB
     float2 posPxMin = posPx - rPx;
@@ -134,22 +154,10 @@ bool SphereViewRectAndZ(float3 posWS, float radiusCm, matrix worldToView, matrix
     tileMax = max(tMin + 1, tMax); // making sure at lease 1 tile is covered
 
     zMin = min(z0, z1);
-    zMax = max(z0, z1);
+    zMax = max(z0 + 1, z1);
+    zMax = min(zMax, gridSize.z);
 
     return true;
-}
-
-
-float3 DebugColorFromIndex(uint idx) {
-    uint h = idx;
-    h ^= h >> 16;
-    h *= 0x7feb352d;
-    h ^= h >> 15;
-    h *= 0x846ca68b;
-    h ^= h >> 16;
-    float3 c = float3((h) & 255u, (h >> 8) & 255u, (h >> 16) & 255u) / 255.0;
-
-    return c;
 }
 
 

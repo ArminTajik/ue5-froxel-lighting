@@ -32,12 +32,6 @@ TAutoConsoleVariable<int32> CVarFroxelGridZ(
     TEXT("Froxel grid dimension Z."),
     ECVF_Default);
 
-TAutoConsoleVariable<int32> CVarFroxelVisualize(
-    TEXT("r.Froxel.Visualize"),
-    0,
-    TEXT("Visualize Froxel grid (0: off, 1: on)."),
-    ECVF_Default);
-
 TAutoConsoleVariable<int32> CVarFroxelMaxLightsPerFroxel(
         TEXT("r.Froxel.MaxLightsPerFroxel"),
         32,
@@ -55,6 +49,19 @@ TAutoConsoleVariable<int32> CVarFroxelZMode(
         1,
         TEXT("Froxel grid Z distribution mode (0: linear, 1: logarithmic)."),
         ECVF_Default);
+
+//
+TAutoConsoleVariable<int32> CVarFroxelVisualize(
+    TEXT("r.Froxel.Visualize"),
+    0,
+    TEXT("Visualize Froxel grid (0: off, 1: heatmap, 2: hash pattern)."),
+    ECVF_Default);
+
+TAutoConsoleVariable<float> CVarFroxelDebugOpacity(
+        TEXT("r.Froxel.DebugOpacity"),
+        0.5f,
+        TEXT("Overlay opacity when compositing on SceneColor."),
+        ECVF_RenderThreadSafe);
 
 
 

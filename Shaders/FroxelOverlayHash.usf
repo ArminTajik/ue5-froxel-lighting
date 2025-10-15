@@ -1,0 +1,31 @@
+/*=============================================================================
+FroxelOverlayHash.usf: Debug view for froxelization debug color hashing
+=============================================================================*/
+
+#include "FroxelOverlayCommon.ush"
+
+SCREEN_PASS_TEXTURE_VIEWPORT(Input)
+Texture2D SceneColorCopy;
+SamplerState SceneColorCopySampler;
+FScreenTransform SvPositionToInputTextureUV;
+Texture2D SceneDepthCopy;
+SamplerState SceneDepthCopySampler;
+float OverlayOpacity;
+
+void MainPS(
+    float4 SvPosition : SV_POSITION,
+    out float4 OutColor : SV_Target0) {
+
+    const float2 UV = ApplyScreenTransform(SvPosition.xy, SvPositionToInputTextureUV);
+    float2 ViewportUV = (int2(SvPosition.xy) - Input_ViewportMin) * Input_ViewportSizeInverse;
+    
+    float4 scene = Texture2DSample(SceneColorCopy, SceneColorCopySampler, UV);
+
+    uint zSlice = ResolveZSliceFromViewportUV(UV, SceneDepthCopy, SceneDepthCopySampler);
+
+    float3 overlay = HashRGB(FroxelIndexFromViewportUV(ViewportUV, zSlice));
+    
+    float3 outRGB = lerp(scene.rgb, overlay, OverlayOpacity);
+
+    OutColor = float4(outRGB, 1.0);
+}

@@ -21,12 +21,14 @@ void MainCS(uint3 DTid : SV_DispatchThreadID) {
 
     uint2 tMin, tMax;
     uint zMin, zMax;
-
+    
     if (!SphereViewRectAndZ(
         L.PositionWS,
         L.Radius,
+        View.PreViewTranslationLow,
         View.TranslatedWorldToView,
         View.TranslatedWorldToClip,
+        View.ViewRectMinAndSize,
         tMin,
         tMax,
         zMin,

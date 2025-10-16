@@ -14,7 +14,7 @@ uint32 FFroxelUtils::GetFroxelIndex(const uint32 X, const uint32 Y, const uint32
 }
 
 TUniformBufferRef<FFroxelUniformParameters> FFroxelUtils::CreateSharedUB(
-    FRDGBuilder& GraphBuilder, const FSceneView& InView, const FIntVector GridSize, int32 NumLights) {
+    FRDGBuilder& GraphBuilder, const FSceneView& InView, const FIntVector GridSize, const int32 NumLights) {
 
     const int32 GX = GridSize.X;
     const int32 GY = GridSize.Y;
@@ -36,7 +36,7 @@ TUniformBufferRef<FFroxelUniformParameters> FFroxelUtils::CreateSharedUB(
         FMath::Max(TileSizeF.X, 1.0f),
         FMath::Max(TileSizeF.Y, 1.0f)
         );
-    FIntPoint TileSize = FIntPoint(
+    const FIntPoint TileSize = FIntPoint(
         FMath::FloorToInt(TileSizeF.X),
         FMath::FloorToInt(TileSizeF.Y)
         );
@@ -55,7 +55,7 @@ TUniformBufferRef<FFroxelUniformParameters> FFroxelUtils::CreateSharedUB(
 }
 
 
-FFroxelLists FFroxelUtils::CreateFroxelLists(FRDGBuilder& GraphBuilder, FIntVector Grid, int32 MaxLightsPerFroxel) {
+FFroxelLists FFroxelUtils::CreateFroxelLists(FRDGBuilder& GraphBuilder, const FIntVector Grid, const int32 MaxLightsPerFroxel) {
     FFroxelLists Lists;
 
     const uint32 FroxelCount = Grid.X * Grid.Y * Grid.Z;

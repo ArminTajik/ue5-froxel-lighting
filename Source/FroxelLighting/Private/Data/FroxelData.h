@@ -15,7 +15,6 @@ struct FFroxelLightData {
     float Radius;
     // FLinearColor Color;
     // float Intensity;
-    // uint32 Flags;
 };
 
 struct FFroxelLists {

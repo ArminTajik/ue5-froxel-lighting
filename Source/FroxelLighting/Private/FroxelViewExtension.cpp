@@ -38,15 +38,21 @@ extern TAutoConsoleVariable<int32> CVarFroxelFarClipCm;
 extern TAutoConsoleVariable<int32> CVarFroxelZMode;
 extern TAutoConsoleVariable<float> CVarFroxelDebugOpacity;
 
-#pragma region Extension Implementation
+#pragma region View Extension Implementation
+
+/**
+ * Capture lights from the scene for froxelization.
+ * This is called on the game thread before rendering.
+ */
 void FFroxelViewExtension::SetupViewFamily(FSceneViewFamily& InViewFamily) {
     FSceneViewExtensionBase::SetupViewFamily(InViewFamily);
-
+    
     if (const FSceneInterface* Scene = InViewFamily.Scene; !Scene || !Scene->HasAnyLights())
         return;
 
     TArray<FFroxelLightData> FrameLights;
     GetFrameLights(InViewFamily, FrameLights);
+    
     {
         // writer thread (GT)
         FScopeLock Lock(&LightBufferMutex); // locking to avoid race condition with render thread
@@ -55,6 +61,10 @@ void FFroxelViewExtension::SetupViewFamily(FSceneViewFamily& InViewFamily) {
     }
 }
 
+/**
+ * Carry over the lights captured on the game thread to the render thread.
+ * This is called on the render thread before rendering the view family.
+ */
 void FFroxelViewExtension::PreRenderViewFamily_RenderThread(FRDGBuilder& GraphBuilder, FSceneViewFamily& InViewFamily) {
     FSceneViewExtensionBase::PreRenderViewFamily_RenderThread(GraphBuilder, InViewFamily);
 
@@ -72,6 +82,11 @@ void FFroxelViewExtension::PreRenderViewFamily_RenderThread(FRDGBuilder& GraphBu
     }
 }
 
+/**
+ * Main froxelization step.
+ * This is called after the base pass has been rendered, but before post-processing.
+ * The reason for this placement is that we need the view (InView) to be fully initialized.
+ */
 void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& GraphBuilder, FSceneView& InView,
                                                                    const FRenderTargetBindingSlots& RenderTargets,
                                                                    TRDGUniformBufferRef<FSceneTextureUniformParameters>
@@ -83,7 +98,8 @@ void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& 
         UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("No lights to froxelize"));
         return;
     }
-    
+
+    // Filter lights that are in the current view frustum
     TArray<FFroxelLightData> LightsInView;
     LightsInView.Reserve(NumLights_RT);
     for (const auto& L : FrameLights_RT) {
@@ -93,10 +109,6 @@ void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& 
     }
     
     const uint32 NumLightsInView = LightsInView.Num();
-    // if (NumLightsInView == 0) {
-    //     UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("No lights in view frustum"));
-    //     return;
-    // }
     
     constexpr uint32 Stride = sizeof(FFroxelLightData);
     
@@ -111,10 +123,11 @@ void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& 
     RDG_GPU_STAT_SCOPE(GraphBuilder, Froxel);
     RDG_EVENT_SCOPE(GraphBuilder, "FroxelScope");
     
+    // creating froxel lists and shared uniform buffer
     FroxelLists = FFroxelUtils::CreateFroxelLists(GraphBuilder, GridSize_RT,
                                                   CVarFroxelMaxLightsPerFroxel.GetValueOnRenderThread());
+
     SharedUB = FFroxelUtils::CreateSharedUB(GraphBuilder, InView, GridSize_RT, NumLightsInView);
-    
     
     
     CountLightPerFroxel(GraphBuilder, InView);
@@ -124,7 +137,10 @@ void FFroxelViewExtension::PostRenderBasePassDeferred_RenderThread(FRDGBuilder& 
 
 }
 
-
+/**
+ * Visualize the froxel grid as an overlay on the final image.
+ * This is called as a post-processing pass if enabled. Use the console variable r.Froxel.Visualize to switch modes.
+ */
 void FFroxelViewExtension::SubscribeToPostProcessingPass(EPostProcessingPass Pass, const FSceneView& InView,
                                                          FPostProcessingPassDelegateArray& InOutPassCallbacks,
                                                          bool bIsPassEnabled) {
@@ -160,7 +176,7 @@ void FFroxelViewExtension::CountLightPerFroxel(FRDGBuilder& GraphBuilder, const 
         return;
     }
 
-    FRDGBufferUAVRef FroxelLightCountsUAV = GraphBuilder.CreateUAV(FroxelLists.Counts);
+    const FRDGBufferUAVRef FroxelLightCountsUAV = GraphBuilder.CreateUAV(FroxelLists.Counts);
     AddClearUAVPass(GraphBuilder, FroxelLightCountsUAV, 0u);
 
     auto* Params = GraphBuilder.AllocParameters<FFroxelCountCS::FParameters>();
@@ -321,7 +337,7 @@ void FFroxelViewExtension::ComputeLightIndices(FRDGBuilder& GraphBuilder, const 
 
     // Compute total number of indices
     {
-        FRDGBufferUAVRef TotalIndicesUAV = GraphBuilder.CreateUAV(FroxelLists.TotalIndices);
+        const FRDGBufferUAVRef TotalIndicesUAV = GraphBuilder.CreateUAV(FroxelLists.TotalIndices);
         AddClearUAVPass(GraphBuilder, TotalIndicesUAV, 0u);
 
         auto* Params = GraphBuilder.AllocParameters<FFroxelTotalIndicesCS::FParameters>();
@@ -412,7 +428,7 @@ FScreenPassTexture FFroxelViewExtension::VisualizeFroxelOverlayPS(
     FRenderTargetBinding RenderTargetBinding = FRenderTargetBinding(InputSceneColor.Texture,
                                                                     ERenderTargetLoadAction::ELoad);
 
-    // hash mode
+    // hash mode: each froxel is assigned a unique color based on a hash function to show the froxel grid structure
     if (Mode == 1) {
 
         auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayHashPS::FParameters>();
@@ -441,7 +457,7 @@ FScreenPassTexture FFroxelViewExtension::VisualizeFroxelOverlayPS(
         return InputSceneColor;
     }
 
-    // heatmap mode
+    // heatmap mode: each froxel is colored based on the number of lights affecting it
     if (Mode == 2 && NumLights_RT > 0) {
 
         auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayHeatmapPS::FParameters>();
@@ -480,192 +496,11 @@ FScreenPassTexture FFroxelViewExtension::VisualizeFroxelOverlayPS(
     return InputSceneColor;
 }
 
-
-// temp for reference (readback)
-void FFroxelViewExtension::BuildFroxelGrid(FRDGBuilder& GraphBuilder, const FSceneView& InView) {
-
-    const ERDGPassFlags RDGPassFlags = ERDGPassFlags::Compute | ERDGPassFlags::NeverCull;
-    UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("BuildFroxelGrid called"));
-
-    FRDGBufferRef FroxelBuffer = GraphBuilder.CreateBuffer(
-        FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GridCount_RT),
-        TEXT("FroxelGrid")
-        );
-
-    FRDGBufferUAVRef FroxelUAV = GraphBuilder.CreateUAV(FroxelBuffer);
-    FRDGBufferSRVRef FroxelSRV = GraphBuilder.CreateSRV(FroxelBuffer);
-
-    AddClearUAVPass(GraphBuilder, FroxelUAV, 0u, RDGPassFlags);
-
-    TShaderMapRef<FFroxelBuildGridCS> ComputeShader(GetGlobalShaderMap(GMaxRHIFeatureLevel));
-
-    auto* Params = GraphBuilder.AllocParameters<FFroxelBuildGridCS::FParameters>();
-
-    // Params->FroxelUB = SharedUB;
-    Params->FroxelGrid = FroxelUAV;
-
-    // SharedParams = GraphBuilder.AllocParameters<FFroxelSharedParameters>();
-    // SharedParams->GridSize = FIntVector4(GX, GY, GZ, GCOUNT);
-    // SharedParams->FroxelGridUAV = FroxelUAV;
-    // SharedParams->InvProj = FMatrix44f(InView.ViewMatrices.GetInvProjectionMatrix());
-    // Params->DepthParams = FVector2f(1.0f / InView.NearClippingDistance, (1.0f / InView.cli) - (1.0f / NearZ));
-
-    // SharedUB = GraphBuilder.CreateUniformBuffer(SharedParams);
-    // Params->Shared = SharedUB;
-
-    // get RHICmdList
-
-    const FIntVector Groups(FComputeShaderUtils::GetGroupCount(
-        GridSize_RT,
-        FIntVector(8, 8, 8)));
-
-    // UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("Groups = (%d,%d,%d), Grid = (%d,%d,%d)"),
-    //        Groups.X, Groups.Y, Groups.Z, GX, GY, GZ);
-
-    RDG_GPU_STAT_SCOPE(GraphBuilder, Froxel);
-    RDG_EVENT_SCOPE(GraphBuilder, "FroxelScope");
-
-    FComputeShaderUtils::AddPass(GraphBuilder,
-                                 RDG_EVENT_NAME("Froxel: BuildGrid [%u x %u x %u]", GridSize_RT.X, GridSize_RT.Y,
-                                                GridSize_RT.Z),
-                                 RDGPassFlags,
-                                 ComputeShader,
-                                 Params,
-                                 Groups);
-
-    // GraphBuilder.AddPass(
-    //     RDG_EVENT_NAME("Froxel: AfterBuildGrid"),
-    //     ERDGPassFlags::None,
-    //     [](FRHICommandListImmediate& RHICmdList) {
-    //         SCOPED_DRAW_EVENT(RHICmdList, FroxelAfterBuildGrid);
-    //     });
-
-    // FFroxelReadbackEntry ReadbackEntry;
-    // ReadbackEntry.Readback = MakeUnique<FRHIGPUBufferReadback>(TEXT("FroxelReadback"));
-    // ReadbackEntry.NumBytes = NumBytes;
-    // ReadbackEntry.GCount = GCOUNT;
-    // ReadbackEntry.Timestamp = FPlatformTime::Seconds();
-    //
-    // AddEnqueueCopyPass(GraphBuilder, ReadbackEntry.Readback.Get(), FroxelBuffer, NumBytes);
-    //
-    // this->PendingReadbacks.Add(MoveTemp(ReadbackEntry));
-
-    // GraphBuilder.AddPass(
-    //     RDG_EVENT_NAME("Froxel: ReadbackResolve"),
-    //     ERDGPassFlags::None,
-    //     [this](FRHICommandListImmediate& RHICmdList) {
-    //         for (int32 i = PendingReadbacks.Num() - 1; i >= 0; --i) {
-    //             if (const FFroxelReadbackEntry& Entry = PendingReadbacks[i]; Entry.Readback->IsReady()) {
-    //                 const uint32* Data = static_cast<const uint32*>(Entry.Readback->Lock(Entry.NumBytes));
-    //                 UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("Froxel[0]=%u mid=%u last=%u"),
-    //                        Data[0], Data[Entry.GCount / 2], Data[Entry.GCount - 1]);
-    //                 Entry.Readback->Unlock();
-    //
-    //                 PendingReadbacks.RemoveAtSwap(i);
-    //             }
-    //         }
-    //     });
-
-    UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("[Froxel] BuildFroxelGrid finished"));
-}
-
-// Temp for reference
-void FFroxelViewExtension::VisualizeFroxelGrid(FRDGBuilder& GraphBuilder, const FSceneView& InView) {
-
-    // extern TAutoConsoleVariable<int32> CVarFroxelVisualize;
-    // UE_LOG(LogFroxelLighting, VeryVerbose, TEXT("[Froxel] VisualizeFroxelGrid called"));
-    // if (CVarFroxelVisualize.GetValueOnRenderThread() == 0) {
-    //     return;
-    // }
-    //
-    // if (!InView.Family)
-    //     return;
-    //
-    // if (InView.bIsSceneCapture ||
-    //     InView.bIsReflectionCapture ||
-    //     InView.bIsPlanarReflection ||
-    //     InView.bIsVirtualTexture) {
-    //     return;
-    // }
-    //
-    // if (!InView.IsPrimarySceneView())
-    //     return;
-    //
-    // // FRDGTextureRef OverlayTex = BuildFroxelOverlay(GraphBuilder, InView);
-    // // if (!OverlayTex)
-    // //     return;
-    //
-    // // Get back buffer as RDG texture
-    // if (!InView.bIsViewInfo || !InView.Family || !InView.Family->RenderTarget)
-    //     return;
-    //
-    // FRHITexture* BackBufferRHI = InView.Family->RenderTarget->GetRenderTargetTexture();
-    // if (!BackBufferRHI)
-    //     return;
-    //
-    // FRDGTextureRef BackBufferRDG = GraphBuilder.FindExternalTexture(BackBufferRHI);
-    // if (!BackBufferRDG) {
-    //     BackBufferRDG = GraphBuilder.RegisterExternalTexture(CreateRenderTarget(BackBufferRHI, TEXT("BackBuffer")));
-    // }
-    //
-    // //
-    // // const FRDGTextureDesc CopyDesc = BackBufferRDG->Desc;
-    // // FRDGTextureRef SceneColorCopyTex = GraphBuilder.CreateTexture(CopyDesc, TEXT("SceneColorCopy"));
-    // // AddCopyTexturePass(GraphBuilder, BackBufferRDG, SceneColorCopyTex);
-    //
-    // const FIntRect ViewRect = InView.UnscaledViewRect;
-    // const FIntPoint ViewSize = ViewRect.Size();
-    //
-    // // FScreenPassTexture InputSPT(SceneColorCopyTex, ViewRect);
-    // // const FScreenPassTextureViewport InputViewport(InputSPT);
-    //
-    // auto* Params = GraphBuilder.AllocParameters<FFroxelOverlayPS::FParameters>();
-    //
-    // FRDGTexture* SceneColorRDG = GraphBuilder.
-    //     FindExternalTexture(InView.Family->RenderTarget->GetRenderTargetTexture());
-    // if (!SceneColorRDG)
-    //     return;
-    //
-    // // Params->FroxelUB = SharedUB;
-    //
-    // // Params->SceneColorCopy = GraphBuilder.CreateSRV(FRDGTextureSRVDesc::Create(SceneColorCopyTex));
-    // // Params->SceneColorCopySampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-    //
-    // const FScreenPassTextureViewport InputViewport(SceneColorRDG, ViewRect);
-    // // Params->Input = GetScreenPassTextureViewportParameters(InputViewport);
-    // // Params->View = InView.ViewUniformBuffer;
-    //
-    // const FSceneTextureShaderParameters SceneTexParams = GetSceneTextureShaderParameters(InView);
-    // if (!SceneTexParams.SceneTextures)
-    //     return;
-    // // Params->SceneTextures = SceneTexParams.SceneTextures;
-    //
-    // Params->SvPositionToInputTextureUV =
-    //     // SV_Position -> ViewportUV -> TextureUV
-    //     FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::TexelPosition,
-    //                                                FScreenTransform::ETextureBasis::ViewportUV) *
-    //     FScreenTransform::ChangeTextureBasisFromTo(InputViewport, FScreenTransform::ETextureBasis::ViewportUV,
-    //                                                FScreenTransform::ETextureBasis::TextureUV);
-    // Params->RenderTargets[0] = FRenderTargetBinding(BackBufferRDG, ERenderTargetLoadAction::ELoad);
-    //
-    // FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-    //
-    // TShaderMapRef<FFroxelOverlayPS> PixelShader(GlobalShaderMap);
-    // // GetScreenPassTextureViewportParameters(
-    // FPixelShaderUtils::AddFullscreenPass(
-    //     GraphBuilder,
-    //     GlobalShaderMap,
-    //     RDG_EVENT_NAME("FroxelOverlay (FPixelShaderUtils)"),
-    //     PixelShader,
-    //     Params,
-    //     ViewRect);
-}
-
 #pragma endregion
 #pragma region Helpers
 
 /**
- * Collect all lights in the scene that affect the world and are visible.
+ * Collect all lights in the scene that affect the world and are visible. No directional lights.
  **/
 void FFroxelViewExtension::GetFrameLights(FSceneViewFamily& InViewFamily, TArray<FFroxelLightData>& OutLights) {
     const FSceneInterface* SceneInterface = InViewFamily.Scene;

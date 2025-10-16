@@ -21,7 +21,7 @@ public:
 
     virtual void BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override {
     }
-
+    
     virtual void PreRenderViewFamily_RenderThread(FRDGBuilder& GraphBuilder, FSceneViewFamily& InViewFamily) override;
 
 
@@ -62,10 +62,6 @@ private:
     FCriticalSection LightBufferMutex; // to protect access to light buffers by game thread and render thread
 
     TArray<FFroxelLightData> FrameLights_GT; // accessed by game thread
-    uint32 NumLights_GT = 0;
-
-    FIntVector GridSize_GT = FIntVector(16, 16, 16);
-    uint32 GridCount_GT = 4096;
 
     TArray<FFroxelLightData> FrameLights_RT; // accessed by render thread
     uint32 NumLights_RT = 0;

@@ -71,7 +71,11 @@ uint FroxelZFromLinearDepthCm(float depthCm) {
     return z;
 }
 
-
+/** Returns whether the sphere is in front of the near plane
+* and computes the XY tile range and Z slice range it covers.
+* Currently, it does not map to the view rect correctly.
+* TODO: add early outs and view rect support
+**/
 bool SphereViewRectAndZ(float3 posWS, float radiusCm, float3 preViewTranslationLow, matrix worldToView,
                         matrix worldToClip, uint4 viewRectMinAndSize, out uint2 tileMin, out uint2 tileMax,
                         out uint zMin,
@@ -89,12 +93,9 @@ bool SphereViewRectAndZ(float3 posWS, float radiusCm, float3 preViewTranslationL
     // worldToClip = FroxelCommon.ProjectionMatrix;
     // int2 viewRectMin = FroxelCommon.ViewRectMinPx;
     float3 posTW = posWS + preViewTranslationLow;
-    // posWS + preViewTranslationLow;
-    // float3 posTW = posWS;
     float3 posVS = mul(float4(posTW, 1.0), worldToView).xyz;
     float4 posCS = mul(float4(posTW, 1.0), worldToClip);
 
-    // hardcoded posCS
 
     float dCenter = -posVS.z;
 
@@ -114,17 +115,13 @@ bool SphereViewRectAndZ(float3 posWS, float radiusCm, float3 preViewTranslationL
     float2 ndc = posCS.xy / posCS.w; // normalized device coords [-1, 1]
     float2 uv = ndc * 0.5f + 0.5f; // convert to [0, 1] UV
     float2 posPx = uv * viewRectSize; // to pixel space
-    // float2 uv  = float2(0.5, 0.5);
-    // float2 posPx = uv * viewportSize;
 
     // getting screen-space radius using the projection’s X scale (approx).
     float projXX = abs(worldToClip[0][0]);
     float rPx = (radiusCm * 100.0 * projXX) * (viewRectSize.x * 0.5f) / posCS.w;
     rPx = max(rPx, 0.5f); // to avoid zero division later
 
-    // rPx = 10.0f; // TEMP for testing
-
-    // // getting screen-space radius using derivative (more accurate)
+    // // getting screen-space radius using derivative
     // float2 dx = ddx(posPx);
     // float2 dy = ddy(posPx);
     // float rPx = length(dx) + length(dy);

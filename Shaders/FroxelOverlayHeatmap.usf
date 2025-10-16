@@ -40,13 +40,12 @@ void MainPS(
     uint3 g = ResolveFroxelCoord(UV, SceneDepthCopy, SceneDepthCopySampler);
     uint fidx = FroxelIndexSafe(g);
 
-    // #if USE_FROXEL_COUNTS
-    //     uint count = FroxelCounts[fidx];
-    // #else
-    //     uint count = FroxelCountFromOffsets(fidx);
-    // #endif
-    //
-    uint count = FroxelLightCounts[fidx];
+    #if USE_FROXEL_COUNTS
+        uint count = FroxelCounts[fidx];
+    #else
+        uint count = FroxelCountFromOffsets(fidx);
+    #endif
+    
     float t = saturate(count / 8.0f);
     float3 heat = lerp(float3(0.0, 0.0, 1.0), float3(1.0, 0.0, 0.0), saturate(t * 2));
     heat = lerp(heat, float3(1.0, 0.0, 0.0), saturate((t - 0.5) * 2));

@@ -39,7 +39,7 @@ Built as a C++/HLSL plugin with Render Graph integration.
 | ![Froxel Grid](Screenshots/froxel_grid.png) | ![Froxel Heatmap](Screenshots/froxel_heatmap.png) |
 
 ### Applied Technologies
-- C++17
+- C++20
 - Unreal Engine 5.6+
 - Render Graph API
 - Slate UI Framework for in-engine HUD
